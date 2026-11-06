@@ -9,45 +9,48 @@ Probably amount for withdrawal and Deposit
 - Argument: account_id, teller_id, (amount)
 """
 class Transactions(ABC):
-    def __init__(self, account_id, teller_id):
-        self._account_id = account_id
+    def __init__(self, teller_id):
         self._teller_id = teller_id
-        
-    @property
-    def account_id(self):
-        return self._account_id
-    @property
-    def teller_id(self):
-        return self._teller_id
 
     # Define an abstract function to print the transaction
     @abstractmethod
-    def transaction_description(self):
+    def transaction_description(self) -> str:
         pass
+
+class RegisterCustomer(Transactions):
+    def __init__(self, teller_id, customer_id):
+        super().__init__(teller_id)
+        self._customer_id = customer_id
+    
+    def transaction_description(self) -> str:
+        return f"{self._teller_id} registered {self._customer_id} into the BankSystem"
 
 class Deposit(Transactions):
     def __init__(self, account_id, teller_id, amount):
-        super().__init__(account_id, teller_id)
+        super().__init__(teller_id)
         self._amount = amount
+        self._account_id = account_id
     
     def transaction_description(self):
-        return f"{self.teller_id} deposited {self._amount} to account {self.account_id}"
+        return f"{self._teller_id} deposited {self._amount} to account {self._account_id}"
    
 class Withdrawal(Transactions):
     def __init__(self, account_id, teller_id, amount):
-        super().__init__(account_id, teller_id)
+        super().__init__(teller_id)
         self._amount = amount
+        self._account_id = account_id
         
     def transaction_description(self):
-        return f"{self.teller_id} withdrew {self._amount} from account {self.account_id}"
+        return f"{self._teller_id} withdrew {self._amount} from account {self._account_id}"
 
 class OpenAccount(Transactions):
     def __init__(self, account_id, teller_id, amount: int = 0):
-        super().__init__(account_id, teller_id)
+        super().__init__(teller_id)
         self._balance = amount
+        self._account_id = account_id
     
     def transaction_description(self):
-        return f"{self.teller_id} opened account, account id: {self.account_id}. Current balance is {self._balance}"
+        return f"{self._teller_id} opened account, account id: {self._account_id}. Current balance is {self._balance}"
 
 """
 Class Teller
@@ -81,6 +84,12 @@ class BankAccount():
     @property
     def balance(self):
         return self._balance
+    @property
+    def customer_id(self):
+        return self._customer_id
+    @property
+    def account_id(self):
+        return self._account_id
     
     def deposit(self, amount):
         print(f"{self._customer_id} deposited {amount} to account {self._account_id}")
@@ -94,7 +103,10 @@ Class Customer
 class Customer():
     def __init__(self, customer_name, account_id=None):
         self._customer_name = customer_name
-        self._accounts_id = account_id if account_id else []
+        if isinstance(account_id, list):
+            self._accounts_id = account_id
+        else:
+            self._accounts_id = [account_id] if account_id else []
     
     def get_customer_name(self):
         return self._customer_name
@@ -123,13 +135,15 @@ class BankSystem():
     def get_transactions(self):
         return self._transactions
     
-    def register_customer(self, customer_name) -> str:
+    def registercustomer(self, customer_name, teller_id) -> str: # pyright: ignore[reportUnknownParameterType]
         while True:
             customer_id_format = string.ascii_uppercase + string.digits
             customer_id = 'C' + "".join(random.choices(customer_id_format, k = 12))
-            if customer_id not in self._customers:
+            if customer_id not in self._customers: # pyright: ignore[reportUnknownMemberType]
                 # Add the customer to the self._customers
                 self._customers[customer_id] = Customer(customer_name)
+                transact = RegisterCustomer(teller_id, customer_id)
+                self._transactions["Register Customer"].append(transact)
                 return customer_id
             
     def generate_account_id(self):
@@ -139,19 +153,25 @@ class BankSystem():
             if account_id not in self._accounts:
                 return account_id
             
-    def check_input_val(self, customer_id, amount):
-        if amount <= 0:
-            raise ValueError("User cannot open account with negative or 0 amount of money")
+    # Validation method
+    def is_valid_amount(self, amount):
+        if amount < 0:
+            raise ValueError("Amount can not be negative")
+    def is_valid_customer_id(self, customer_id):
         if customer_id not in self._customers:
-            raise ValueError(f"{customer_id} does not exist in the BankSystem. Please register before opening an account")
+            raise ValueError(f"{customer_id} is not in the BankSystem. Please register first.")
+    def is_valid_account_id(self, account_id):
+        if account_id not in self._accounts:
+            raise ValueError(f"{account_id} is not in the BankSystem. Please open the account first.")
     
     def open_account(self, customer_id, amount, teller_id):
-        self.check_input_val(customer_id, amount)
+        self.is_valid_amount(amount)
+        self.is_valid_customer_id(customer_id)
         
         # Generate an account_id and add this account_id to the BankSystem
         account_id = self.generate_account_id()
         self._accounts[account_id] = BankAccount(customer_id, account_id, amount) # Add account_id to the BankSystem
-        self._customers[customer_id].get_accounts_id().append(account_id)
+        self._customers[customer_id].get_accounts_id().append(account_id) # Add account_id to the class Customer
         
         # Update into transaction
         transact = OpenAccount(account_id, teller_id, amount)
@@ -175,14 +195,19 @@ class BankSystem():
                 return customer.get_accounts_id()[int(account_num) - 1]
     
     def deposit(self, customer_id, teller_id, amount, account_id=None):
-        self.check_input_val(customer_id, amount)
+        self.is_valid_amount(amount)
+        self.is_valid_customer_id(customer_id)
         
         # If the user forgets their account_id
         if not account_id:
             account_id = self.select_account(customer_id)
-        
+
+        # If user provided account_id
         if account_id not in self._accounts:
             raise ValueError(f"{account_id} does not exist in the BankSystem")
+        # Check if customer_id given by the user matches the one in the BankAccount
+        if customer_id != self._accounts[account_id].customer_id:
+            raise ValueError(f"Given customer_id: {customer_id} does not match the customer_id in the account. Please make sure you provide the correct customer_id or account_id")
         
         # Update the bank account
         account = self._accounts[account_id]
@@ -193,18 +218,24 @@ class BankSystem():
         self._transactions["Deposit"].append(transact)
         
     def withdrawal(self, customer_id, teller_id, amount, account_id=None):
-        self.check_input_val(customer_id, amount)
+        self.is_valid_amount(amount)
+        self.is_valid_customer_id(customer_id)
         
         # If the user forgets their account_id
         if not account_id:
             account_id = self.select_account(customer_id)
+
+        # If the user provieded account_id
         if account_id not in self._accounts:
             raise ValueError(f"{account_id} does not exist in the BankSystem")
-        
+        # Check if customer_id given by the user matches the one in the BankAccount
+        if customer_id != self._accounts[account_id].customer_id: 
+            raise ValueError(f"Given customer_id: {customer_id} does not match the customer_id in the account. Please make sure you provide the correct customer_id or account_id")
+
         # Update the bank account
         account = self._accounts[account_id]
         if account.balance < amount:
-            raise ValueError(f"{account_id} has no enough money")
+            raise ValueError(f"{account_id} doesn't have enough money")
 
         account.withdrawal(amount)
         
